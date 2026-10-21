@@ -86,7 +86,55 @@ const SAMPLE_INVOICE: ExtractedData = {
     },
   ],
 };
+// Compresses heavy smartphone camera photos to ~350KB before uploading to avoid Vercel 4.5MB limit
+const compressImage = async (file: File): Promise<File> => {
+  if (!file.type.startsWith("image/") || file.size < 1024 * 1024) {
+    return file;
+  }
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.src = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(img.src);
+      const canvas = document.createElement("canvas");
+      let width = img.width;
+      let height = img.height;
+      const maxDim = 1600;
 
+      if (width > maxDim || height > maxDim) {
+        if (width > height) {
+          height = Math.round((height * maxDim) / width);
+          width = maxDim;
+        } else {
+          width = Math.round((width * maxDim) / height);
+          height = maxDim;
+        }
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      ctx?.drawImage(img, 0, 0, width, height);
+
+      canvas.toBlob(
+        (blob) => {
+          if (blob) {
+            resolve(
+              new File([blob], file.name.replace(/\.[^/.]+$/, ".jpg"), {
+                type: "image/jpeg",
+              })
+            );
+          } else {
+            resolve(file);
+          }
+        },
+        "image/jpeg",
+        0.82
+      );
+    };
+    img.onerror = () => resolve(file);
+  });
+};
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -101,24 +149,41 @@ export default function Home() {
   const extractReceipt = async (selectedFile: File) => {
     setLoading(true);
     setError(null);
-    setLoadingStep("Reading document pixels with Gemini 3.8 Flash...");
-
-    const formData = new FormData();
-    formData.append("file", selectedFile);
+    setLoadingStep("Optimizing image resolution for OCR...");
 
     try {
-      setTimeout(() => setLoadingStep("Enforcing strict JSON Schema extraction..."), 800);
-      setTimeout(() => setLoadingStep("Running automated math validation checks..."), 1600);
+      // 1. Shrink heavy camera photo to <500KB
+      const fileToUpload = await compressImage(selectedFile);
+
+      setLoadingStep("Reading document pixels with Gemini 3.8 Flash...");
+      const formData = new FormData();
+      formData.append("file", fileToUpload);
 
       const res = await fetch("/api/extract", {
         method: "POST",
         body: formData,
       });
 
-      const json = await res.json();
+      // 2. Handle non-JSON server errors (like 413 or 504) gracefully
+      const contentType = res.headers.get("content-type");
       if (!res.ok) {
-        throw new Error(json.error || "Failed to extract data");
+        let errorMsg = "Extraction failed";
+        if (contentType && contentType.includes("application/json")) {
+          const errJson = await res.json();
+          errorMsg = errJson.error || errorMsg;
+        } else {
+          const rawText = await res.text();
+          if (res.status === 413 || rawText.includes("Entity Too Large")) {
+            errorMsg = "File size too large for cloud server. Try taking photo slightly further away.";
+          } else {
+            errorMsg = `Server error (${res.status}): ${rawText.slice(0, 100)}`;
+          }
+        }
+        throw new Error(errorMsg);
       }
+
+      setLoadingStep("Enforcing strict JSON Schema extraction...");
+      const json = await res.json();
 
       const record: ExtractedData = {
         ...json,
@@ -427,8 +492,8 @@ export default function Home() {
                     key={idx}
                     onClick={() => setData(item)}
                     className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all text-xs ${data?.id === item.id
-                        ? "bg-blue-600/10 border-blue-500/50 text-white shadow-sm"
-                        : "bg-slate-950/40 border-white/[0.04] text-slate-400 hover:border-white/[0.1] hover:text-slate-200"
+                      ? "bg-blue-600/10 border-blue-500/50 text-white shadow-sm"
+                      : "bg-slate-950/40 border-white/[0.04] text-slate-400 hover:border-white/[0.1] hover:text-slate-200"
                       }`}
                   >
                     <div className="truncate pr-2">
@@ -501,8 +566,8 @@ export default function Home() {
               {/* Reconciliation & Math Check Ribbon */}
               <div
                 className={`p-4 rounded-2xl border flex items-center justify-between gap-4 shadow-xl transition-all ${isMathValid
-                    ? "bg-emerald-950/20 border-emerald-500/30 text-emerald-200"
-                    : "bg-amber-950/20 border-amber-500/30 text-amber-200"
+                  ? "bg-emerald-950/20 border-emerald-500/30 text-emerald-200"
+                  : "bg-amber-950/20 border-amber-500/30 text-amber-200"
                   }`}
               >
                 <div className="flex items-center gap-3.5">
@@ -580,8 +645,8 @@ export default function Home() {
                     <button
                       onClick={() => setActiveTab("table")}
                       className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${activeTab === "table"
-                          ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30"
-                          : "text-slate-400 hover:text-white"
+                        ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30"
+                        : "text-slate-400 hover:text-white"
                         }`}
                     >
                       Line Items Studio
@@ -589,8 +654,8 @@ export default function Home() {
                     <button
                       onClick={() => setActiveTab("audit")}
                       className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${activeTab === "audit"
-                          ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30"
-                          : "text-slate-400 hover:text-white"
+                        ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30"
+                        : "text-slate-400 hover:text-white"
                         }`}
                     >
                       Audit Rules
@@ -598,8 +663,8 @@ export default function Home() {
                     <button
                       onClick={() => setActiveTab("json")}
                       className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === "json"
-                          ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30"
-                          : "text-slate-400 hover:text-white"
+                        ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30"
+                        : "text-slate-400 hover:text-white"
                         }`}
                     >
                       <Code2 className="w-3.5 h-3.5" /> Schema JSON
@@ -752,8 +817,8 @@ export default function Home() {
                         </div>
                         <span
                           className={`px-2.5 py-1 rounded-lg text-[10px] font-bold ${data.total > 1000
-                              ? "bg-amber-500/10 text-amber-300 border border-amber-500/20"
-                              : "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20"
+                            ? "bg-amber-500/10 text-amber-300 border border-amber-500/20"
+                            : "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20"
                             }`}
                         >
                           {data.total > 1000 ? "Review Required" : "Auto-Approved"}
@@ -792,8 +857,8 @@ export default function Home() {
                         </div>
                         <span
                           className={`px-2.5 py-1 rounded-lg text-[10px] font-bold ${isMathValid
-                              ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20"
-                              : "bg-amber-500/10 text-amber-300 border border-amber-500/20"
+                            ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20"
+                            : "bg-amber-500/10 text-amber-300 border border-amber-500/20"
                             }`}
                         >
                           {isMathValid ? "Reconciled" : "Discrepancy"}
