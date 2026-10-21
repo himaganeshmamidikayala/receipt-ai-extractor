@@ -4,7 +4,6 @@ import { useState } from "react";
 import {
   Upload,
   Camera,
-  FileText,
   CheckCircle2,
   AlertTriangle,
   Download,
@@ -23,9 +22,12 @@ import {
   Eye,
   Plus,
   Copy,
-  Check,
   Zap,
-  ArrowUpRight,
+  Printer,
+  Maximize2,
+  X,
+  Share2,
+  ChevronDown,
 } from "lucide-react";
 
 interface LineItem {
@@ -48,45 +50,53 @@ interface ExtractedData {
   items: LineItem[];
 }
 
-// Built-in fail-safe sample for live judge demos
-const SAMPLE_INVOICE: ExtractedData = {
-  id: "demo-sample",
-  vendor: "Varasiddhi Silk Exports",
-  date: "2019-10-28",
-  invoice_number: "IN-761",
-  currency: "₹",
-  subtotal: 1138.12,
-  tax: 56.88,
-  total: 1195.0,
-  category: "General",
-  items: [
-    {
-      description: "Varasiddhi Silks Men's Formal Shirt (Navy Blue, 42)",
-      quantity: 1,
-      unit_price: 538.1,
-      total: 538.1,
-    },
-    {
-      description: "Apparel Delivery & Shipping Charges",
-      quantity: 1,
-      unit_price: 30.96,
-      total: 30.96,
-    },
-    {
-      description: "Varasiddhi Silks Men's Formal Shirt (Navy Blue, 40)",
-      quantity: 1,
-      unit_price: 538.1,
-      total: 538.1,
-    },
-    {
-      description: "Secondary Logistics Surcharge",
-      quantity: 1,
-      unit_price: 30.96,
-      total: 30.96,
-    },
-  ],
+const CATEGORIES = [
+  "Retail & Apparel",
+  "Meals & Entertainment",
+  "Utilities & Electricity",
+  "Office Supplies",
+  "Software & Cloud",
+  "General Operations",
+];
+
+const SAMPLE_BILLS: Record<string, ExtractedData> = {
+  balaji: {
+    id: "sample-balaji",
+    vendor: "Balaji Banian Stores",
+    date: "2026-10-15",
+    invoice_number: "NO-011098",
+    currency: "₹",
+    subtotal: 1655.0,
+    tax: 0.0,
+    total: 1655.0,
+    category: "Retail & Apparel",
+    items: [
+      { description: "Innerwear / Bras", quantity: 1, unit_price: 160.0, total: 160.0 },
+      { description: "Kids Wear (Casual)", quantity: 1, unit_price: 425.0, total: 425.0 },
+      { description: "Kids Wear (Party)", quantity: 1, unit_price: 455.0, total: 455.0 },
+      { description: "Kids Wear (Formal Set)", quantity: 1, unit_price: 615.0, total: 615.0 },
+    ],
+  },
+  amazon: {
+    id: "sample-amazon",
+    vendor: "Varasiddhi Silk Exports",
+    date: "2019-10-28",
+    invoice_number: "IN-761",
+    currency: "₹",
+    subtotal: 1138.12,
+    tax: 56.88,
+    total: 1195.0,
+    category: "Retail & Apparel",
+    items: [
+      { description: "Varasiddhi Silks Men's Formal Shirt (Navy Blue, 42)", quantity: 1, unit_price: 538.1, total: 538.1 },
+      { description: "Shipping & Handling Charges", quantity: 1, unit_price: 30.96, total: 30.96 },
+      { description: "Varasiddhi Silks Men's Formal Shirt (Navy Blue, 40)", quantity: 1, unit_price: 538.1, total: 538.1 },
+      { description: "Secondary Logistics Surcharge", quantity: 1, unit_price: 30.96, total: 30.96 },
+    ],
+  },
 };
-// Compresses heavy smartphone camera photos to ~350KB before uploading to avoid Vercel 4.5MB limit
+
+// Canvas-based compressor: shrinks heavy phone photos to ~350KB to bypass Vercel 4.5MB limit
 const compressImage = async (file: File): Promise<File> => {
   if (!file.type.startsWith("image/") || file.size < 1024 * 1024) {
     return file;
@@ -135,6 +145,7 @@ const compressImage = async (file: File): Promise<File> => {
     img.onerror = () => resolve(file);
   });
 };
+
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -144,18 +155,24 @@ export default function Home() {
   const [history, setHistory] = useState<ExtractedData[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"table" | "audit" | "json">("table");
-  const [copiedJson, setCopiedJson] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isLightboxOpen, setIsLightboxOpen] = useState(false);
+  const [isCategoryOpen, setIsCategoryOpen] = useState(false);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
 
   const extractReceipt = async (selectedFile: File) => {
     setLoading(true);
     setError(null);
-    setLoadingStep("Optimizing image resolution for OCR...");
+    setLoadingStep("Optimizing image resolution...");
 
     try {
-      // 1. Shrink heavy camera photo to <500KB
       const fileToUpload = await compressImage(selectedFile);
+      setLoadingStep("Extracting fields with Gemini 3.8 Flash...");
 
-      setLoadingStep("Reading document pixels with Gemini 3.8 Flash...");
       const formData = new FormData();
       formData.append("file", fileToUpload);
 
@@ -164,7 +181,6 @@ export default function Home() {
         body: formData,
       });
 
-      // 2. Handle non-JSON server errors (like 413 or 504) gracefully
       const contentType = res.headers.get("content-type");
       if (!res.ok) {
         let errorMsg = "Extraction failed";
@@ -174,7 +190,7 @@ export default function Home() {
         } else {
           const rawText = await res.text();
           if (res.status === 413 || rawText.includes("Entity Too Large")) {
-            errorMsg = "File size too large for cloud server. Try taking photo slightly further away.";
+            errorMsg = "File size exceeds server threshold. Try a cropped photo.";
           } else {
             errorMsg = `Server error (${res.status}): ${rawText.slice(0, 100)}`;
           }
@@ -182,7 +198,7 @@ export default function Home() {
         throw new Error(errorMsg);
       }
 
-      setLoadingStep("Enforcing strict JSON Schema extraction...");
+      setLoadingStep("Verifying arithmetic balance...");
       const json = await res.json();
 
       const record: ExtractedData = {
@@ -192,8 +208,9 @@ export default function Home() {
 
       setData(record);
       setHistory((prev) => [record, ...prev]);
+      showToast("Document verified and parsed successfully");
     } catch (err: any) {
-      setError(err.message || "Something went wrong while processing the receipt.");
+      setError(err.message || "Failed to process receipt.");
     } finally {
       setLoading(false);
       setLoadingStep("");
@@ -211,17 +228,18 @@ export default function Home() {
     }
   };
 
-  const loadSample = () => {
-    setData(SAMPLE_INVOICE);
+  const loadPreset = (key: "balaji" | "amazon") => {
+    const preset = SAMPLE_BILLS[key];
+    setData(preset);
     setPreviewUrl(null);
     setFile(null);
     setError(null);
-    if (!history.some((h) => h.id === SAMPLE_INVOICE.id)) {
-      setHistory((prev) => [SAMPLE_INVOICE, ...prev]);
+    if (!history.some((h) => h.id === preset.id)) {
+      setHistory((prev) => [preset, ...prev]);
     }
+    showToast(`Loaded ${preset.vendor} sample`);
   };
 
-  // Editable Table: Updates row & recalculates math dynamically
   const handleItemChange = (index: number, field: keyof LineItem, value: any) => {
     if (!data) return;
     const updatedItems = [...data.items];
@@ -237,13 +255,12 @@ export default function Home() {
     const newSubtotal = updatedItems.reduce((acc, curr) => acc + (Number(curr.total) || 0), 0);
     const newTotal = newSubtotal + Number(data.tax || 0);
 
-    const updated = {
+    setData({
       ...data,
       items: updatedItems,
       subtotal: parseFloat(newSubtotal.toFixed(2)),
       total: parseFloat(newTotal.toFixed(2)),
-    };
-    setData(updated);
+    });
   };
 
   const handleDeleteItem = (index: number) => {
@@ -258,12 +275,13 @@ export default function Home() {
       subtotal: parseFloat(newSubtotal.toFixed(2)),
       total: parseFloat(newTotal.toFixed(2)),
     });
+    showToast("Line item removed");
   };
 
   const handleAddItem = () => {
     if (!data) return;
     const newItem: LineItem = {
-      description: "New Item / Service Charge",
+      description: "Service Charge / Additional Item",
       quantity: 1,
       unit_price: 0,
       total: 0,
@@ -272,9 +290,9 @@ export default function Home() {
       ...data,
       items: [...data.items, newItem],
     });
+    showToast("New editable line item added");
   };
 
-  // Bulletproof CSV Export with UTF-8 BOM
   const handleDownloadCSV = () => {
     if (!data) return;
 
@@ -288,26 +306,22 @@ export default function Home() {
       ["Item Description", "Qty", "Unit Price", "Total Amount"],
     ];
 
-    if (data.items && data.items.length > 0) {
-      data.items.forEach((item) => {
-        rows.push([
-          item.description || "",
-          String(item.quantity ?? 1),
-          String(item.unit_price ?? 0),
-          String(item.total ?? 0),
-        ]);
-      });
-    }
+    data.items.forEach((item) => {
+      rows.push([
+        item.description || "",
+        String(item.quantity ?? 1),
+        String(item.unit_price ?? 0),
+        String(item.total ?? 0),
+      ]);
+    });
 
     rows.push([]);
     rows.push(["", "", "Subtotal", String(data.subtotal ?? 0)]);
-    rows.push(["", "", "Tax / Regulatory Cess", String(data.tax ?? 0)]);
-    rows.push(["", "", "Net Total Payable", String(data.total ?? 0)]);
+    rows.push(["", "", "Tax / Regulatory Duty", String(data.tax ?? 0)]);
+    rows.push(["", "", "Grand Total", String(data.total ?? 0)]);
 
     const csvContent = rows
-      .map((row) =>
-        row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")
-      )
+      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
       .join("\r\n");
 
     const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
@@ -319,13 +333,23 @@ export default function Home() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+    showToast("CSV Ledger exported successfully");
   };
 
-  const handleCopyJson = () => {
+  const handleCopyMemo = () => {
     if (!data) return;
-    navigator.clipboard.writeText(JSON.stringify(data, null, 2));
-    setCopiedJson(true);
-    setTimeout(() => setCopiedJson(false), 2000);
+    const memo = `📋 *EXPENSE REIMBURSEMENT MEMO*
+• Entity: ${data.vendor}
+• Date: ${data.date}
+• Reference: ${data.invoice_number || "N/A"}
+• Category: ${data.category}
+• Net Payable: ${data.currency} ${data.total.toFixed(2)}
+• Line Breakdown (${data.items.length}):
+${data.items.map((i) => `  - ${i.description}:${data.currency}${i.total.toFixed(2)} (Qty:${i.quantity})`).join("\n")}
+• Audit Check: ${isMathValid ? "Reconciled (Zero Variance)" : "Variance Detected"}`;
+
+    navigator.clipboard.writeText(memo);
+    showToast("Reimbursement memo copied to clipboard");
   };
 
   const isMathValid = data
@@ -336,112 +360,175 @@ export default function Home() {
   const activeCurrency = data?.currency || history[0]?.currency || "₹";
 
   return (
-    <main className="min-h-screen bg-[#07090E] text-slate-100 p-4 md:p-8 font-sans selection:bg-indigo-500 selection:text-white relative overflow-hidden">
-      {/* Background Ambient Glow Lights */}
-      <div className="absolute top-0 left-1/4 w-96 h-96 bg-blue-600/10 rounded-full blur-[120px] pointer-events-none" />
-      <div className="absolute top-1/3 right-10 w-80 h-80 bg-indigo-600/10 rounded-full blur-[100px] pointer-events-none" />
+    <main className="min-h-screen bg-[#07090F] text-slate-100 font-sans selection:bg-indigo-500 selection:text-white relative pb-16">
+      {/* Background Lighting */}
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[900px] h-[350px] bg-gradient-to-b from-blue-600/15 via-indigo-600/10 to-transparent blur-[120px] pointer-events-none" />
 
-      {/* Top Header & Executive Metrics */}
-      <header className="max-w-7xl mx-auto flex flex-col lg:flex-row lg:items-center justify-between pb-6 mb-8 border-b border-white/[0.08] gap-6 relative z-10">
-        <div className="flex items-center gap-4">
-          <div className="p-3 bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-400 rounded-2xl shadow-xl shadow-indigo-500/20 border border-white/20">
-            <Receipt className="w-6 h-6 text-white" />
+      {/* Toast Alert */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 bg-slate-900/95 border border-indigo-500/40 text-slate-100 px-4 py-3 rounded-2xl shadow-2xl shadow-indigo-500/20 backdrop-blur-xl text-xs font-semibold">
+          <Sparkles className="w-4 h-4 text-indigo-400 shrink-0" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Lightbox Modal */}
+      {isLightboxOpen && previewUrl && (
+        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-4">
+          <div className="absolute top-4 right-4 flex items-center gap-3">
+            <button
+              onClick={() => setIsLightboxOpen(false)}
+              className="p-2.5 bg-slate-800/80 hover:bg-slate-700 rounded-full text-slate-300 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
-          <div>
-            <div className="flex items-center gap-2.5">
-              <h1 className="text-xl md:text-2xl font-black tracking-tight text-white">
-                LedgerPulse <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-300">AI</span>
-              </h1>
-              <span className="flex items-center gap-1 text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                Gemini 3.8 Flash Online
-              </span>
+          <div className="max-w-4xl max-h-[85vh] overflow-auto rounded-2xl border border-white/10 p-2 bg-black/40 shadow-2xl">
+            <img
+              src={previewUrl}
+              alt="Document Fullscreen"
+              className="max-h-[80vh] w-auto object-contain rounded-xl"
+            />
+          </div>
+          <p className="text-xs text-slate-400 mt-3 font-mono">High-resolution document optical viewer</p>
+        </div>
+      )}
+
+      {/* Top Navigation */}
+      <nav className="border-b border-white/[0.07] bg-[#07090F]/80 backdrop-blur-xl sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-4 md:px-8 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-3.5">
+            <div className="w-9 h-9 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/25 border border-white/20">
+              <Receipt className="w-4 h-4 text-white" />
             </div>
-            <p className="text-xs text-slate-400 flex items-center gap-1.5 mt-1">
-              <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-              Autonomous Invoice Ingestion, Audit Verification & ERP Bridge
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold tracking-tight text-white">LedgerPulse</span>
+                <span className="text-[10px] font-mono font-semibold uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded-md">
+                  Studio
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/80 border border-white/[0.08] text-[11px] text-slate-300">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Gemini 3.8 Flash Online</span>
+            </div>
+
+            <button
+              onClick={() => loadPreset("balaji")}
+              className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-blue-600/20 to-indigo-600/20 hover:from-blue-600/30 hover:to-indigo-600/30 border border-blue-500/30 text-blue-300 text-xs font-semibold transition-all hover:scale-[1.02] active:scale-95 flex items-center gap-1.5"
+            >
+              <Zap className="w-3.5 h-3.5 text-blue-400" />
+              <span>Live Sample</span>
+            </button>
+          </div>
+        </div>
+      </nav>
+
+      {/* Header & KPI Ribbon */}
+      <section className="max-w-7xl mx-auto px-4 md:px-8 pt-8 pb-6">
+        <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 pb-6 border-b border-white/[0.06]">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-white">
+              Autonomous Document Intelligence
+            </h1>
+            <p className="text-xs md:text-sm text-slate-400 mt-1 max-w-xl">
+              Extract, reconcile, and audit receipts, commercial invoices, and utility bills directly into structured accounting ledgers.
             </p>
           </div>
+
+          <div className="flex items-center gap-3 overflow-x-auto pb-1 lg:pb-0">
+            <div className="bg-[#0C101D] border border-white/[0.08] rounded-2xl px-4 py-2.5 min-w-[130px] shadow-sm">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                <TrendingUp className="w-3 h-3 text-emerald-400" /> Processed Volume
+              </div>
+              <div className="text-base font-black text-white mt-0.5">
+                {activeCurrency} {totalLedger.toFixed(2)}
+              </div>
+            </div>
+
+            <div className="bg-[#0C101D] border border-white/[0.08] rounded-2xl px-4 py-2.5 min-w-[110px] shadow-sm">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                <Layers className="w-3 h-3 text-blue-400" /> Total Bills
+              </div>
+              <div className="text-base font-black text-white mt-0.5">
+                {history.length} <span className="text-xs text-slate-500 font-normal">Docs</span>
+              </div>
+            </div>
+
+            <div className="bg-[#0C101D] border border-white/[0.08] rounded-2xl px-4 py-2.5 min-w-[130px] shadow-sm">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                <ShieldCheck className="w-3 h-3 text-indigo-400" /> System Status
+              </div>
+              <div className="text-base font-black text-emerald-400 mt-0.5 flex items-center gap-1">
+                {data ? (isMathValid ? "100% Balanced" : "Variance Flag") : "Standby"}
+              </div>
+            </div>
+          </div>
         </div>
+      </section>
 
-        {/* Real-time KPI Ribbon */}
-        <div className="flex items-center gap-3 overflow-x-auto pb-1 lg:pb-0">
-          <div className="bg-[#0D121F]/80 backdrop-blur-md border border-white/[0.08] rounded-2xl px-4 py-2.5 min-w-[140px] shadow-sm">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <TrendingUp className="w-3.5 h-3.5 text-emerald-400" /> Total Spend
-            </div>
-            <div className="text-lg font-black text-white mt-0.5 tracking-tight">
-              {activeCurrency} {totalLedger.toFixed(2)}
-            </div>
-          </div>
-
-          <div className="bg-[#0D121F]/80 backdrop-blur-md border border-white/[0.08] rounded-2xl px-4 py-2.5 min-w-[120px] shadow-sm">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <Layers className="w-3.5 h-3.5 text-blue-400" /> Processed
-            </div>
-            <div className="text-lg font-black text-white mt-0.5 tracking-tight">
-              {history.length} <span className="text-xs text-slate-400 font-normal">Docs</span>
-            </div>
-          </div>
-
-          <div className="bg-[#0D121F]/80 backdrop-blur-md border border-white/[0.08] rounded-2xl px-4 py-2.5 min-w-[130px] shadow-sm">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" /> Health
-            </div>
-            <div className="text-lg font-black text-emerald-400 mt-0.5 tracking-tight flex items-center gap-1">
-              {data ? (isMathValid ? "Passed" : "Variance") : "Standby"}
-            </div>
-          </div>
-
-          {/* Quick Demo Button for Presentations */}
-          <button
-            onClick={loadSample}
-            className="flex items-center gap-1.5 px-3 py-2.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-2xl text-xs font-semibold transition-all hover:scale-[1.02] active:scale-95 whitespace-nowrap"
-            title="Load ready-made invoice for demo"
-          >
-            <Zap className="w-3.5 h-3.5 text-indigo-400" />
-            Try Sample
-          </button>
-        </div>
-      </header>
-
-      {/* Main Dual-Column Layout */}
-      <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 relative z-10">
-        {/* Left Column: Mobile-Safe Ingestion, Session Stack & Preview */}
+      {/* Main Dual-Column Content */}
+      <div className="max-w-7xl mx-auto px-4 md:px-8 grid grid-cols-1 lg:grid-cols-12 gap-8 mt-2">
+        {/* Left Column: Upload & History */}
         <section className="lg:col-span-5 flex flex-col gap-6">
-          {/* Document Dropzone */}
-          <div className="bg-[#0D121F]/90 backdrop-blur-xl border border-white/[0.08] rounded-3xl p-6 shadow-2xl relative overflow-hidden">
+          <div className="bg-[#0C101D]/90 backdrop-blur-xl border border-white/[0.08] rounded-3xl p-6 shadow-2xl relative overflow-hidden">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-bold text-slate-200 flex items-center gap-2">
-                <Upload className="w-4 h-4 text-blue-400" /> Document Ingestion
+                <Upload className="w-4 h-4 text-blue-400" /> Ingestion Target
               </h2>
-              <span className="text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-full font-semibold">
-                Auto-Trigger
-              </span>
+              <span className="text-[10px] font-semibold text-slate-400">Fast Optical Parse</span>
             </div>
 
-            {/* Tap/Drop Upload Target */}
-            <div className="relative group flex flex-col items-center justify-center border-2 border-dashed border-slate-700/80 hover:border-blue-500/80 bg-slate-950/60 hover:bg-slate-950/90 rounded-2xl p-8 transition-all duration-300 text-center cursor-pointer">
+            <div className="relative group flex flex-col items-center justify-center border-2 border-dashed border-slate-700/80 hover:border-blue-500/80 bg-slate-950/50 hover:bg-slate-950/80 rounded-2xl p-8 transition-all duration-300 text-center cursor-pointer">
               <input
                 type="file"
                 accept="image/*,application/pdf"
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-30"
                 onChange={handleFileChange}
               />
-              <div className="p-4 bg-slate-900 border border-white/[0.06] rounded-2xl mb-3 shadow-lg group-hover:scale-110 group-hover:border-blue-500/40 transition-all duration-300">
+              <div className="p-4 bg-slate-900 border border-white/[0.08] rounded-2xl mb-3 shadow-xl group-hover:scale-110 group-hover:border-blue-500/50 transition-all duration-300">
                 <Camera className="w-7 h-7 text-blue-400" />
               </div>
-              <span className="text-sm font-semibold text-slate-200">
-                Tap to snap photo or select file
+              <span className="text-sm font-bold text-slate-200">
+                Snap photo or upload bill
               </span>
               <span className="text-xs text-slate-500 mt-1">
-                Receipts, electricity bills, retail invoices (JPG, PNG, PDF)
+                Receipts, electricity bills, tax invoices (JPG, PNG, PDF)
               </span>
+
+              {/* Sample Shortcuts */}
+              <div className="mt-5 pt-4 border-t border-white/[0.06] flex items-center gap-2 z-40 relative">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Demo Presets:</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    loadPreset("balaji");
+                  }}
+                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] rounded-lg transition-colors border border-white/10 font-medium"
+                >
+                  Balaji Stores
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    loadPreset("amazon");
+                  }}
+                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] rounded-lg transition-colors border border-white/10 font-medium"
+                >
+                  Amazon Tax Bill
+                </button>
+              </div>
             </div>
 
             {file && (
               <div className="mt-4 flex items-center justify-between bg-slate-950/80 border border-white/[0.08] px-3.5 py-2.5 rounded-xl text-xs">
-                <span className="truncate max-w-[190px] text-slate-300 font-mono">
+                <span className="truncate max-w-[200px] text-slate-300 font-mono">
                   {file.name}
                 </span>
                 <button
@@ -468,17 +555,18 @@ export default function Home() {
             )}
           </div>
 
-          {/* Session Ledger (Multiple Bills Memory) */}
+          {/* Session Ledger */}
           {history.length > 0 && (
-            <div className="bg-[#0D121F]/70 backdrop-blur-xl border border-white/[0.08] rounded-3xl p-5 shadow-xl">
+            <div className="bg-[#0C101D]/70 backdrop-blur-xl border border-white/[0.08] rounded-3xl p-5 shadow-xl">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <Layers className="w-3.5 h-3.5 text-blue-400" /> Session Ledger ({history.length})
+                  <Layers className="w-3.5 h-3.5 text-blue-400" /> Scanned Session Ledger ({history.length})
                 </h3>
                 <button
                   onClick={() => {
                     setHistory([]);
                     setData(null);
+                    showToast("Session history cleared");
                   }}
                   className="text-[11px] text-slate-500 hover:text-red-400 transition-colors flex items-center gap-1"
                 >
@@ -490,10 +578,13 @@ export default function Home() {
                 {history.map((item, idx) => (
                   <div
                     key={idx}
-                    onClick={() => setData(item)}
+                    onClick={() => {
+                      setData(item);
+                      showToast(`Switched to ${item.vendor}`);
+                    }}
                     className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all text-xs ${data?.id === item.id
-                      ? "bg-blue-600/10 border-blue-500/50 text-white shadow-sm"
-                      : "bg-slate-950/40 border-white/[0.04] text-slate-400 hover:border-white/[0.1] hover:text-slate-200"
+                        ? "bg-blue-600/10 border-blue-500/50 text-white shadow-sm"
+                        : "bg-slate-950/40 border-white/[0.04] text-slate-400 hover:border-white/[0.1] hover:text-slate-200"
                       }`}
                   >
                     <div className="truncate pr-2">
@@ -511,39 +602,53 @@ export default function Home() {
 
           {/* Source Document Preview */}
           {previewUrl && (
-            <div className="bg-[#0D121F]/70 backdrop-blur-xl border border-white/[0.08] rounded-3xl p-4 shadow-xl flex flex-col">
-              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-                <Eye className="w-3.5 h-3.5 text-blue-400" /> Source Invoice Preview
-              </h3>
-              <div className="max-h-[360px] overflow-auto rounded-2xl border border-white/[0.06] bg-black/60 flex items-center justify-center p-2">
+            <div className="bg-[#0C101D]/70 backdrop-blur-xl border border-white/[0.08] rounded-3xl p-4 shadow-xl flex flex-col">
+              <div className="flex items-center justify-between mb-2.5">
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <Eye className="w-3.5 h-3.5 text-blue-400" /> Original Source Document
+                </h3>
+                <button
+                  onClick={() => setIsLightboxOpen(true)}
+                  className="text-[11px] text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-colors"
+                >
+                  <Maximize2 className="w-3 h-3" /> Expand
+                </button>
+              </div>
+              <div
+                onClick={() => setIsLightboxOpen(true)}
+                className="max-h-[360px] overflow-auto rounded-2xl border border-white/[0.06] bg-black/60 flex items-center justify-center p-2 cursor-pointer hover:border-blue-500/40 transition-all group relative"
+              >
                 <img
                   src={previewUrl}
                   alt="Source Document"
                   className="max-h-[340px] w-auto object-contain rounded-lg"
                 />
+                <div className="absolute inset-0 bg-blue-600/0 group-hover:bg-blue-600/10 rounded-2xl transition-all flex items-center justify-center">
+                  <span className="opacity-0 group-hover:opacity-100 bg-black/80 text-white text-[10px] font-semibold px-2.5 py-1 rounded-full border border-white/20 transition-all shadow-lg">
+                    Click to Inspect
+                  </span>
+                </div>
               </div>
             </div>
           )}
         </section>
 
-        {/* Right Column: Structured Intelligence Hub */}
+        {/* Right Column: Structured Data Hub */}
         <section className="lg:col-span-7 flex flex-col gap-6">
-          {/* Empty State */}
           {!data && !loading && (
-            <div className="bg-[#0D121F]/40 backdrop-blur-xl border border-dashed border-white/[0.08] rounded-3xl p-16 text-center text-slate-500 flex flex-col items-center justify-center min-h-[480px]">
+            <div className="bg-[#0C101D]/40 backdrop-blur-xl border border-dashed border-white/[0.08] rounded-3xl p-16 text-center text-slate-500 flex flex-col items-center justify-center min-h-[480px]">
               <div className="p-5 bg-slate-900/60 rounded-3xl mb-4 border border-white/[0.06] shadow-xl">
                 <Receipt className="w-12 h-12 text-slate-600" />
               </div>
               <h3 className="text-lg font-bold text-slate-200">Awaiting Invoice Submission</h3>
               <p className="text-xs text-slate-400 mt-1.5 max-w-sm leading-relaxed">
-                Take a photo on your phone or tap <span className="text-indigo-400 font-semibold">"Try Sample"</span> above to trigger schema-constrained extraction.
+                Upload a bill or select a preset on the left to extract vendor details, parse itemized rows, and perform balance verification.
               </p>
             </div>
           )}
 
-          {/* Interactive Loading Pipeline State */}
           {loading && (
-            <div className="bg-[#0D121F]/80 backdrop-blur-xl border border-white/[0.08] rounded-3xl p-16 text-center flex flex-col items-center justify-center min-h-[480px] shadow-2xl">
+            <div className="bg-[#0C101D]/80 backdrop-blur-xl border border-white/[0.08] rounded-3xl p-16 text-center flex flex-col items-center justify-center min-h-[480px] shadow-2xl">
               <div className="relative flex items-center justify-center mb-6">
                 <div className="w-20 h-20 rounded-full border-4 border-blue-500/20 border-t-blue-500 animate-spin" />
                 <Sparkles className="w-8 h-8 text-indigo-400 absolute animate-pulse" />
@@ -560,14 +665,13 @@ export default function Home() {
             </div>
           )}
 
-          {/* Active Data Dashboard */}
           {data && (
             <div className="flex flex-col gap-6">
-              {/* Reconciliation & Math Check Ribbon */}
+              {/* Reconciliation Banner */}
               <div
                 className={`p-4 rounded-2xl border flex items-center justify-between gap-4 shadow-xl transition-all ${isMathValid
-                  ? "bg-emerald-950/20 border-emerald-500/30 text-emerald-200"
-                  : "bg-amber-950/20 border-amber-500/30 text-amber-200"
+                    ? "bg-emerald-950/20 border-emerald-500/30 text-emerald-200"
+                    : "bg-amber-950/20 border-amber-500/30 text-amber-200"
                   }`}
               >
                 <div className="flex items-center gap-3.5">
@@ -598,9 +702,9 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Core Metadata Bento Grid */}
+              {/* Bento Grid Metadata */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div className="bg-[#0D121F]/80 backdrop-blur-md border border-white/[0.08] p-4 rounded-2xl">
+                <div className="bg-[#0C101D] border border-white/[0.08] p-4 rounded-2xl">
                   <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
                     <Building2 className="w-3.5 h-3.5 text-blue-400" /> Vendor / Issuer
                   </div>
@@ -609,25 +713,54 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="bg-[#0D121F]/80 backdrop-blur-md border border-white/[0.08] p-4 rounded-2xl">
+                <div className="bg-[#0C101D] border border-white/[0.08] p-4 rounded-2xl">
                   <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                    <Calendar className="w-3.5 h-3.5 text-indigo-400" /> Date
+                    <Calendar className="w-3.5 h-3.5 text-indigo-400" /> Invoice Date
                   </div>
                   <div className="font-bold text-sm text-slate-100 font-mono">
                     {data.date || "N/A"}
                   </div>
                 </div>
 
-                <div className="bg-[#0D121F]/80 backdrop-blur-md border border-white/[0.08] p-4 rounded-2xl">
-                  <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                    <Tag className="w-3.5 h-3.5 text-emerald-400" /> GL Category
+                <div className="bg-[#0C101D] border border-white/[0.08] p-4 rounded-2xl relative">
+                  <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                    <span className="flex items-center gap-1.5">
+                      <Tag className="w-3.5 h-3.5 text-emerald-400" /> GL Category
+                    </span>
+                    <button
+                      onClick={() => setIsCategoryOpen(!isCategoryOpen)}
+                      className="text-slate-400 hover:text-white"
+                    >
+                      <ChevronDown className="w-3 h-3" />
+                    </button>
                   </div>
-                  <div className="font-bold text-sm text-indigo-300">
+                  <div
+                    onClick={() => setIsCategoryOpen(!isCategoryOpen)}
+                    className="font-bold text-xs text-indigo-300 truncate cursor-pointer hover:text-white transition-colors"
+                  >
                     {data.category}
                   </div>
+
+                  {isCategoryOpen && (
+                    <div className="absolute top-full left-0 right-0 mt-2 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-1 z-30 space-y-1">
+                      {CATEGORIES.map((cat, idx) => (
+                        <div
+                          key={idx}
+                          onClick={() => {
+                            setData({ ...data, category: cat });
+                            setIsCategoryOpen(false);
+                            showToast(`Assigned GL category: ${cat}`);
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-800 cursor-pointer text-slate-200 transition-colors"
+                        >
+                          {cat}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
-                <div className="bg-[#0D121F]/80 backdrop-blur-md border border-white/[0.08] p-4 rounded-2xl">
+                <div className="bg-[#0C101D] border border-white/[0.08] p-4 rounded-2xl">
                   <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
                     <Receipt className="w-3.5 h-3.5 text-cyan-400" /> Net Payable
                   </div>
@@ -637,16 +770,15 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Workspace Studio: Tabs & Export */}
-              <div className="bg-[#0D121F]/80 backdrop-blur-xl border border-white/[0.08] rounded-3xl overflow-hidden shadow-2xl">
-                {/* Navigation Bar */}
+              {/* Workspace Studio */}
+              <div className="bg-[#0C101D]/90 backdrop-blur-xl border border-white/[0.08] rounded-3xl overflow-hidden shadow-2xl">
                 <div className="p-3 border-b border-white/[0.08] flex flex-wrap items-center justify-between gap-3 bg-slate-950/40">
                   <div className="flex items-center gap-1 bg-slate-900/90 border border-white/[0.06] p-1 rounded-2xl">
                     <button
                       onClick={() => setActiveTab("table")}
                       className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${activeTab === "table"
-                        ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30"
-                        : "text-slate-400 hover:text-white"
+                          ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30"
+                          : "text-slate-400 hover:text-white"
                         }`}
                     >
                       Line Items Studio
@@ -654,8 +786,8 @@ export default function Home() {
                     <button
                       onClick={() => setActiveTab("audit")}
                       className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${activeTab === "audit"
-                        ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30"
-                        : "text-slate-400 hover:text-white"
+                          ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30"
+                          : "text-slate-400 hover:text-white"
                         }`}
                     >
                       Audit Rules
@@ -663,8 +795,8 @@ export default function Home() {
                     <button
                       onClick={() => setActiveTab("json")}
                       className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === "json"
-                        ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30"
-                        : "text-slate-400 hover:text-white"
+                          ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30"
+                          : "text-slate-400 hover:text-white"
                         }`}
                     >
                       <Code2 className="w-3.5 h-3.5" /> Schema JSON
@@ -673,15 +805,31 @@ export default function Home() {
 
                   <div className="flex items-center gap-2">
                     <button
+                      onClick={handleCopyMemo}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition-all"
+                      title="Copy formatted expense reimbursement memo"
+                    >
+                      <Share2 className="w-3.5 h-3.5" /> Copy Memo
+                    </button>
+
+                    <button
+                      onClick={() => window.print()}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition-all"
+                      title="Print accounting voucher"
+                    >
+                      <Printer className="w-3.5 h-3.5" /> Print
+                    </button>
+
+                    <button
                       onClick={handleDownloadCSV}
-                      className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 transition-all hover:scale-[1.02] active:scale-95"
+                      className="flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 transition-all hover:scale-[1.02] active:scale-95"
                     >
                       <Download className="w-3.5 h-3.5" /> Export CSV
                     </button>
                   </div>
                 </div>
 
-                {/* Tab 1: Interactive Line Items Studio */}
+                {/* Tab 1: Table */}
                 {activeTab === "table" && (
                   <div>
                     <div className="overflow-x-auto">
@@ -714,7 +862,7 @@ export default function Home() {
                                     type="number"
                                     value={item.quantity}
                                     onChange={(e) =>
-                                      handleItemChange(idx, "quantity", e.target.value)
+                                      handleItemChange(idx, "quantity", parseFloat(e.target.value) || 0)
                                     }
                                     className="w-16 text-center bg-transparent hover:bg-slate-900/60 focus:bg-slate-950 focus:border-blue-500 border border-transparent rounded-lg px-1 py-1 text-slate-100 transition-all outline-none"
                                   />
@@ -725,7 +873,7 @@ export default function Home() {
                                     step="0.01"
                                     value={item.unit_price}
                                     onChange={(e) =>
-                                      handleItemChange(idx, "unit_price", e.target.value)
+                                      handleItemChange(idx, "unit_price", parseFloat(e.target.value) || 0)
                                     }
                                     className="w-24 text-right bg-transparent hover:bg-slate-900/60 focus:bg-slate-950 focus:border-blue-500 border border-transparent rounded-lg px-2 py-1 text-slate-100 transition-all outline-none"
                                   />
@@ -755,7 +903,6 @@ export default function Home() {
                       </table>
                     </div>
 
-                    {/* Add Item Action */}
                     <div className="p-3 bg-slate-950/40 border-t border-white/[0.04] flex items-center justify-between">
                       <button
                         onClick={handleAddItem}
@@ -763,13 +910,11 @@ export default function Home() {
                       >
                         <Plus className="w-3.5 h-3.5" /> Add Line Item
                       </button>
-
                       <div className="text-[11px] text-slate-500 font-mono">
-                        {data.items.length} items logged
+                        {data.items.length} line items registered
                       </div>
                     </div>
 
-                    {/* Summary Footer */}
                     <div className="bg-slate-950/70 p-5 border-t border-white/[0.06] flex flex-col gap-2 items-end text-xs">
                       <div className="flex justify-between w-60 text-slate-400">
                         <span>Line Subtotal:</span>
@@ -793,7 +938,7 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Tab 2: Compliance & Policy Audit Engine */}
+                {/* Tab 2: Audit */}
                 {activeTab === "audit" && (
                   <div className="p-6 space-y-4">
                     <div className="text-xs text-slate-400 mb-2">
@@ -809,7 +954,7 @@ export default function Home() {
                             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                           )}
                           <div>
-                            <div className="font-bold text-slate-200">Expense Approval Threshold</div>
+                            <div className="font-bold text-slate-200">Executive Approval Limit</div>
                             <div className="text-[11px] text-slate-500">
                               Transactions exceeding 1,000 threshold require dual VP authorization
                             </div>
@@ -817,8 +962,8 @@ export default function Home() {
                         </div>
                         <span
                           className={`px-2.5 py-1 rounded-lg text-[10px] font-bold ${data.total > 1000
-                            ? "bg-amber-500/10 text-amber-300 border border-amber-500/20"
-                            : "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20"
+                              ? "bg-amber-500/10 text-amber-300 border border-amber-500/20"
+                              : "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20"
                             }`}
                         >
                           {data.total > 1000 ? "Review Required" : "Auto-Approved"}
@@ -857,8 +1002,8 @@ export default function Home() {
                         </div>
                         <span
                           className={`px-2.5 py-1 rounded-lg text-[10px] font-bold ${isMathValid
-                            ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20"
-                            : "bg-amber-500/10 text-amber-300 border border-amber-500/20"
+                              ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20"
+                              : "bg-amber-500/10 text-amber-300 border border-amber-500/20"
                             }`}
                         >
                           {isMathValid ? "Reconciled" : "Discrepancy"}
@@ -868,7 +1013,7 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Tab 3: Strict Schema JSON */}
+                {/* Tab 3: JSON */}
                 {activeTab === "json" && (
                   <div className="p-4 bg-[#05070B]">
                     <div className="flex items-center justify-between mb-3 px-1">
@@ -877,18 +1022,13 @@ export default function Home() {
                         gemini_strict_schema_output.json
                       </span>
                       <button
-                        onClick={handleCopyJson}
+                        onClick={() => {
+                          navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+                          showToast("Raw JSON copied to clipboard");
+                        }}
                         className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-colors px-2.5 py-1 rounded-lg bg-blue-500/10 border border-blue-500/20"
                       >
-                        {copiedJson ? (
-                          <>
-                            <Check className="w-3 h-3 text-emerald-400" /> Copied!
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3 h-3" /> Copy JSON
-                          </>
-                        )}
+                        <Copy className="w-3 h-3" /> Copy JSON
                       </button>
                     </div>
                     <pre className="text-[11px] font-mono text-cyan-200/90 overflow-x-auto max-h-[360px] p-4 bg-black/60 rounded-2xl border border-white/[0.06] leading-relaxed">
