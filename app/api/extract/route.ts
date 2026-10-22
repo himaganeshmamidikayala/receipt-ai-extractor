@@ -1,124 +1,131 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY || "",
-});
+export const maxDuration = 60;
 
-// Define the strict structured JSON schema for invoices and receipts
-const receiptSchema = {
-  type: "object",
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+
+const invoiceSchema = {
+  type: SchemaType.OBJECT,
   properties: {
     vendor: {
-      type: "string",
-      description: "Business name, store, or utility board (e.g., Walmart, State Electricity Discom)",
+      type: SchemaType.STRING,
+      description: "Business or merchant name",
     },
     date: {
-      type: "string",
-      description: "Bill date or transaction date in YYYY-MM-DD or readable format",
+      type: SchemaType.STRING,
+      description: "Date of transaction in YYYY-MM-DD or as printed",
     },
     invoice_number: {
-      type: "string",
-      description: "Receipt number, invoice ID, or consumer/service number if utility bill",
+      type: SchemaType.STRING,
+      description: "Receipt, invoice, or reference identifier",
     },
     currency: {
-      type: "string",
-      description: "Currency symbol or code (e.g., USD, INR, EUR, £, $)",
+      type: SchemaType.STRING,
+      description: "Currency symbol or ISO code (e.g., ₹, $, €, EUR, USD)",
     },
     subtotal: {
-      type: "number",
-      description: "Subtotal before taxes or base charges",
+      type: SchemaType.NUMBER,
+      description: "Net subtotal before tax as declared on bill",
     },
     tax: {
-      type: "number",
-      description: "Tax, VAT, GST, electricity duty, or surcharge amount",
+      type: SchemaType.NUMBER,
+      description: "Total tax/VAT/GST amount. 0 if none",
     },
     total: {
-      type: "number",
-      description: "Final net total amount payable",
+      type: SchemaType.NUMBER,
+      description: "Final gross total payable amount",
     },
     category: {
-      type: "string",
-      enum: ["Office Supplies", "Travel & Meals", "Utilities", "Software", "Equipment", "General"],
-      description: "Accounting category for this expense",
+      type: SchemaType.STRING,
+      description: "Expense classification (e.g. Equipment, Retail, Meals, Cloud)",
     },
     items: {
-      type: "array",
-      description: "Itemized breakdown of purchased items or service charge components",
+      type: SchemaType.ARRAY,
+      description: "Itemized line breakdown",
       items: {
-        type: "object",
+        type: SchemaType.OBJECT,
         properties: {
-          description: { type: "string" },
-          quantity: { type: "number" },
-          unit_price: { type: "number" },
-          total: { type: "number" },
+          description: { type: SchemaType.STRING },
+          quantity: { type: SchemaType.NUMBER },
+          unit_price: { type: SchemaType.NUMBER },
+          total: { type: SchemaType.NUMBER },
         },
         required: ["description", "quantity", "unit_price", "total"],
       },
     },
   },
-  required: ["vendor", "date", "currency", "subtotal", "tax", "total", "category", "items"],
+  required: ["vendor", "currency", "subtotal", "tax", "total", "category", "items"],
 };
+
+const ACTIVE_MODELS = ["gemini-3.8-flash"];
 
 export async function POST(req: NextRequest) {
   try {
-    if (!process.env.GEMINI_API_KEY) {
-      return NextResponse.json(
-        { error: "GEMINI_API_KEY is not configured in .env.local" },
-        { status: 500 }
-      );
-    }
-
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
 
     if (!file) {
-      return NextResponse.json({ error: "No file was uploaded" }, { status: 400 });
+      return NextResponse.json({ error: "No document provided" }, { status: 400 });
     }
 
-    // Convert file to Base64
-    const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
-    const base64Data = buffer.toString("base64");
-    const mimeType = file.type || "image/jpeg";
+    const arrayBuffer = await file.arrayBuffer();
+    const base64Data = Buffer.from(arrayBuffer).toString("base64");
 
-    // Call Gemini with strict JSON Schema output
-    const response = await ai.models.generateContent({
-      model: "gemini-3.8-flash",
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              inlineData: {
-                data: base64Data,
-                mimeType: mimeType,
-              },
-            },
-            {
-              text: `Analyze this receipt or invoice carefully. Extract the merchant/utility vendor, date, invoice or consumer reference number, currency, subtotal, tax, final total, and all itemized line items. If it is an electricity or utility bill, categorize it under 'Utilities' and map base consumption charges to subtotal and regulatory duties/cess to tax. Output must adhere strictly to the schema.`,
-            },
-          ],
-        },
-      ],
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: receiptSchema,
-        temperature: 0.1, // Low temperature for factual precision
-      },
-    });
+    const prompt = `
+You are a high-speed optical financial parser. Extract the financial metadata and line items from this image strictly into the requested JSON schema.
+- Perform a single direct extraction pass.
+- If printed numbers contradict, extract what is printed on the receipt without entering calculation loops.
+- Do not invent missing values.
+`;
 
-    const outputText = response.text;
-    if (!outputText) {
-      return NextResponse.json({ error: "Model returned an empty response" }, { status: 502 });
+    let lastError: any = null;
+
+    for (const modelName of ACTIVE_MODELS) {
+      try {
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: invoiceSchema,
+            temperature: 0.1,
+          } as any,
+        });
+
+        const result = await model.generateContent([
+          prompt,
+          {
+            inlineData: {
+              mimeType: file.type || "image/jpeg",
+              data: base64Data,
+            },
+          },
+        ]);
+
+        const text = result.response.text();
+        const data = JSON.parse(text);
+        return NextResponse.json(data);
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`Model ${modelName} error:`, err?.message);
+      }
     }
 
-    const parsedData = JSON.parse(outputText);
-    return NextResponse.json(parsedData);
+    const errText = String(lastError?.message || "");
+    let cleanMessage = "Extraction failed. Please tap Re-extract.";
+
+    if (errText.includes("503") || lastError?.status === 503) {
+      cleanMessage = "Google AI clusters are experiencing high traffic. Tap Re-extract to retry.";
+    } else if (errText.includes("429") || lastError?.status === 429) {
+      cleanMessage = "Free API rate limit reached. Please wait 20 seconds and tap Re-extract.";
+    } else if (lastError?.message) {
+      cleanMessage = lastError.message;
+    }
+
+    return NextResponse.json({ error: cleanMessage }, { status: 500 });
   } catch (error: any) {
-    console.error("Extraction error:", error);
     return NextResponse.json(
-      { error: error.message || "Failed to process document with Gemini" },
+      { error: error?.message || "Failed to process receipt image." },
       { status: 500 }
     );
   }
