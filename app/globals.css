@@ -1,8 +1,12 @@
 @import "tailwindcss";
 
 :root {
-  --background: #090d16;
-  --foreground: #f1f5f9;
+  --background: #070b14;
+  --foreground: #f8fafc;
+  --card-bg: rgba(13, 19, 35, 0.75);
+  --card-border: rgba(255, 255, 255, 0.08);
+  --accent-teal: #0d9488;
+  --accent-emerald: #10b981;
 }
 
 @theme inline {
@@ -17,52 +21,160 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
   overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Custom subtle scrollbar */
+/* Subtle modern scrollbar */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.6);
+  background: rgba(7, 11, 20, 0.8);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(51, 65, 85, 0.8);
-  border-radius: 4px;
+  background: rgba(51, 65, 85, 0.6);
+  border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(71, 85, 105, 1);
+  background: rgba(71, 85, 105, 0.9);
 }
 
-/* Glassmorphism helpers */
-.glass-panel {
-  background: rgba(15, 23, 42, 0.7);
+/* Premium Fintech Background Grid & Ambience */
+.bg-fintech-mesh {
+  background-color: #070b14;
+  background-image: 
+    radial-gradient(circle at 50% 0%, rgba(13, 148, 136, 0.12) 0%, transparent 50%),
+    radial-gradient(circle at 85% 15%, rgba(16, 185, 129, 0.08) 0%, transparent 40%),
+    radial-gradient(circle at 15% 30%, rgba(56, 189, 248, 0.06) 0%, transparent 45%),
+    radial-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 100% 100%, 28px 28px;
+}
+
+/* Glassmorphism & Surface Tokens */
+.fintech-card {
+  background: rgba(13, 19, 35, 0.72);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 12px 36px -8px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(255, 255, 255, 0.04) inset;
 }
 
-.glass-card {
-  background: rgba(30, 41, 59, 0.5);
+.fintech-card-subtle {
+  background: rgba(10, 15, 28, 0.6);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-/* Scanline animation for receipt scanner preview */
-@keyframes scanline {
+.fintech-card-elevated {
+  background: rgba(17, 24, 43, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 20px 48px -12px rgba(0, 0, 0, 0.6), 0 1px 2px rgba(255, 255, 255, 0.06) inset;
+}
+
+/* Micro-interaction interactive styles */
+.fintech-interactive {
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), 
+              border-color 0.2s ease, 
+              box-shadow 0.2s ease, 
+              background-color 0.2s ease;
+}
+
+.fintech-interactive:hover {
+  border-color: rgba(45, 212, 191, 0.28);
+  box-shadow: 0 16px 40px -10px rgba(13, 148, 136, 0.12), 0 0 0 1px rgba(45, 212, 191, 0.12);
+}
+
+/* Smooth Scanline for OCR Preview */
+@keyframes scanningBeam {
   0% {
-    transform: translateY(-100%);
+    top: 0%;
+    opacity: 0.8;
+  }
+  50% {
+    top: calc(100% - 2px);
+    opacity: 1;
   }
   100% {
-    transform: translateY(1000%);
+    top: 0%;
+    opacity: 0.8;
   }
 }
 
-.animate-scan {
-  animation: scanline 3s linear infinite;
+.animate-scan-beam {
+  animation: scanningBeam 2.4s ease-in-out infinite;
+}
+
+/* Soft shimmer effect */
+@keyframes shimmerPulse {
+  0%, 100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+.animate-shimmer {
+  animation: shimmerPulse 2s ease-in-out infinite;
+}
+
+/* Pulse dot animation */
+@keyframes statusDot {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.25);
+    opacity: 0.5;
+  }
+}
+
+.animate-status-dot {
+  animation: statusDot 2s ease-in-out infinite;
+}
+
+/* Accessibility: respect reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Print Voucher Optimization */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  .print-card {
+    border: 1px solid #cbd5e1 !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+    box-shadow: none !important;
+  }
+  input {
+    border: none !important;
+    background: transparent !important;
+    color: #000000 !important;
+  }
 }

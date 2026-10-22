@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ReceiptLens AI — Intelligent Receipt & Invoice Extractor",
-  description: "Next.js App Router AI receipt and invoice extractor powered by Google Gemini multimodal intelligence.",
+  title: "LedgerPulse — Intelligent AI Receipt & Financial Data Extractor",
+  description: "Turn receipts into structured data. Review itemized details, verify zero-variance reconciliation, and export clean CSVs with LedgerPulse.",
 };
 
 export default function RootLayout({
